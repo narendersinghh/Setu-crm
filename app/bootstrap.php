@@ -18,6 +18,6 @@ require APP.'/helpers.php';
 date_default_timezone_set(setting('timezone','Asia/Kolkata')?:'Asia/Kolkata');
 DB::q("SET time_zone=?",[date('P')]);
 if(PHP_SAPI!=='cli'&&session_status()===PHP_SESSION_NONE){
-  session_name('anvesha_sid');
+  session_name('setu_sid');
   session_set_cookie_params(['lifetime'=>0,'path'=>'/','httponly'=>true,'samesite'=>'Lax','secure'=>!empty($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off']);
   session_start();}

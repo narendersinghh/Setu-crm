@@ -14,7 +14,7 @@ $M=Usage::month();$P=Usage::prices();$D=Usage::daily(30);
 [$rate,$fxm,$fxat]=Usage::fx();$cur=setting('currency','INR');$sym=setting('currency_symbol','₹');
 $lc=fn($usd)=>$cur==='USD'?'$'.number_format($usd,2):$sym.number_format($usd*$rate,$usd*$rate<100?2:0);
 $usd=fn($v)=>'$'.number_format($v,$v<10?2:0);
-$groups=['Maps & website data'=>['google_places','serpapi','pagespeed'],'AI writing'=>['anthropic','web_search','openai','openrouter','gemini','groq','deepseek','custom'],'Messaging'=>['email','whatsapp','whatsapp_api'],'AI voice calls'=>['voice_sarvam','voice_bland','voice_vapi','voice_retell','voice_custom'],'Calendar'=>['gcal']];
+$groups=['Maps & website data'=>['google_places','google_places_details','google_places_ids','google_places_atmo','google_places_details_atmo','serpapi','pagespeed'],'AI writing'=>['anthropic','web_search','openai','openrouter','gemini','groq','deepseek','custom'],'Messaging'=>['email','whatsapp','whatsapp_api'],'AI voice calls'=>['voice_sarvam','voice_bland','voice_vapi','voice_retell','voice_custom'],'Calendar'=>['gcal']];
 $rows=[];$tc=0;$tp=0;$calls=0;$warn=[];
 foreach($groups as $g=>$ks)foreach($ks as $k){if(!isset($C[$k]))continue;$c=$C[$k];$m=$M[$k]??null;$price=(float)($P[$k]['price']??$c[3]);$free=(float)($P[$k]['free']??$c[4]);[$b,$bp]=Usage::bill($k,$m,$price,$free);$tc+=$b;$tp+=$bp;$calls+=$m['calls']??0;if($m&&$free>0&&$m['proj']>$free)$warn[]=$c[0];$rows[$g][]=[$k,$c,$m,$price,$free,$b,$bp,Usage::status($k)];}
 $fmt=fn($c,$m)=>!$m?'<span class="muted">0</span>':($c[2]==='tokens'?number_format($m['in']/1000,1).'k in · '.number_format($m['out']/1000,1).'k out':number_format($m['units'],$c[2]==='minutes'?1:0).' <small class="muted">'.$c[2].'</small>');

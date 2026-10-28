@@ -3,7 +3,11 @@
 final class Usage{
   // unit: what one "unit" is. price: USD per unit (tokens: per 1M input/output). free: free units per month (or per day for 'day')
   static function catalog(){return [
-    'google_places'=>['Google Places API (New) – Text Search','search','calls',0.040,1000,'month','https://developers.google.com/maps/billing-and-pricing/pricing','Our search asks for phone, website, rating, hours & description (Enterprise + Atmosphere SKU). Each page of up to 20 results = 1 call. First 1,000 calls per month free under Google\'s per-SKU free usage.'],
+    'google_places'=>['Google Places – Text Search (Enterprise)','search','requests',0.035,1000,'month','https://developers.google.com/maps/billing-and-pricing/pricing','1 request = 1 result page of up to 20 businesses (20 dentists = 1 request, 60 = 3). Billed per request – not per business or per field – at the highest SKU of the fields asked for. Phone, website, rating & hours make it "Text Search Enterprise": $35 per 1,000 after 1,000 free requests a month.'],
+    'google_places_atmo'=>['Google Places – Text Search (Enterprise + Atmosphere)','search','requests',0.040,1000,'month','https://developers.google.com/maps/billing-and-pricing/pricing','Used only when "Fetch business descriptions" is on (adds the editorial summary): $40 per 1,000 after 1,000 free requests a month.'],
+    'google_places_ids'=>['Google Places – duplicate check (IDs only)','search','requests',0,0,'month','https://developers.google.com/maps/billing-and-pricing/pricing','Text Search asking only for place IDs is free and unlimited (Essentials IDs only). Setu uses it before every page so businesses already in your data are never paid for twice.'],
+    'google_places_details'=>['Google Places – Place Details (Enterprise)','search','requests',0.020,1000,'month','https://developers.google.com/maps/billing-and-pricing/pricing','1 request = full details of 1 business. Used instead of a whole result page when only 1 new business is left on a page (cheaper). $20 per 1,000 after 1,000 free a month.'],
+    'google_places_details_atmo'=>['Google Places – Place Details (Enterprise + Atmosphere)','search','requests',0.025,1000,'month','https://developers.google.com/maps/billing-and-pricing/pricing','Place Details with business descriptions: $25 per 1,000 after 1,000 free a month.'],
     'serpapi'=>['SerpAPI – Google Maps','search','searches',0.015,250,'month','https://serpapi.com/pricing','Each page of 20 results = 1 search. Free plan: 250 searches/month; paid plans from about $0.015 per search.'],
     'pagespeed'=>['Google PageSpeed Insights','audit','calls',0,25000,'day','https://developers.google.com/speed/docs/insights/v5/get-started','Free. Default quota 25,000 calls per day.'],
     'anthropic'=>['Anthropic Claude','tokens','tokens',0,0,'month','https://www.anthropic.com/pricing','Billed per million input / output tokens (prices below). One report ≈ 10k input + 5k output tokens.'],
@@ -57,7 +61,6 @@ final class Usage{
   static function status($k){
     $has=fn($x)=>setting($x)!=='';$ai=setting('ai_provider','anthropic');
     switch($k){
-      case 'google_places':return $has('google_api_key')?(setting('maps_source','places')==='places'?['Active','green']:['Key added','teal']):['Not added','gray'];
       case 'serpapi':return $has('serpapi_key')?(setting('maps_source')==='serpapi'?['Active','green']:['Key added','teal']):['Not added','gray'];
       case 'pagespeed':return $has('google_api_key')&&setting('pagespeed')==='1'?['Active','green']:['Off','gray'];
       case 'web_search':return $ai==='anthropic'&&$has('ai_key_anthropic')&&setting('ai_web_research','1')==='1'?['Active','green']:['Off','gray'];
@@ -65,6 +68,7 @@ final class Usage{
       case 'whatsapp_api':return setting('wa_provider')==='generic'?['Active','green']:['Not added','gray'];
       case 'email':return Mailer::ready()?['Active · '.(Mailer::smtp()?'SMTP':'PHP mail'),'green']:['Not set up','amber'];
       case 'gcal':return GCal::ready()?['Connected','green']:['Not connected','gray'];}
+    if(strpos($k,'google_places')===0)return !$has('google_api_key')?['Not added','gray']:($k==='google_places_ids'?['Free · automatic','green']:(strpos($k,'_atmo')!==false?(Maps::atmo()?['Active','green']:['Off','gray']):(Maps::atmo()?['Off','gray']:(setting('maps_source','places')==='places'?['Active','green']:['Key added','teal']))));
     if(strpos($k,'voice_')===0)return setting('voice_provider')===substr($k,6)?(Voice::ready()?['Active','green']:['Incomplete','amber']):['Not added','gray'];
     if(isset(AI::providers()[$k]))return $has('ai_key_'.$k)?($ai===$k?['Active','green']:['Key added','teal']):['Not added','gray'];
     return ['—','gray'];}

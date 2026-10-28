@@ -2,8 +2,10 @@
 function e($s){return htmlspecialchars((string)$s,ENT_QUOTES,'UTF-8');}
 function setting($k,$d=''){return Settings::get($k,$d);}
 function cfg($k,$d=null){return $GLOBALS['CFG'][$k]??$d;}
+// Public address of the app: Settings → Company → App address, else config.php "url", else the current host
+function app_url(){static $u=null;if($u===null){try{$u=(string)setting('app_url');}catch(Throwable $e){$u='';}$u=rtrim($u?:(string)cfg('url',''),'/');}return $u;}
 function base_url($p=''){
-  $u=rtrim((string)cfg('url',''),'/');
+  $u=app_url();
   if($u===''&&isset($_SERVER['HTTP_HOST'])){$u=(!empty($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off'?'https':'http').'://'.$_SERVER['HTTP_HOST'].rtrim(str_replace('\\','/',dirname($_SERVER['SCRIPT_NAME'])),'/');}
   return $u.'/'.ltrim($p,'/');}
 function url($r,$q=[]){return 'index.php?'.http_build_query(['r'=>$r]+$q);}

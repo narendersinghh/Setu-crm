@@ -6,7 +6,8 @@ Built for **shared hosting** (cPanel / Hostinger / any PHP host): plain PHP 8 + 
 
 ## Features
 **Prospecting**
-- **Map Scraper** – keyword + location, top 10/20/30/40/50/100 or any number (Google Places API up to 60, SerpAPI 100+). Missing phone numbers and emails are found on each website.
+- **Map Scraper** – keyword + location, top 10/20/30/40/50/100 or any number (Google Places API up to 60, SerpAPI 100+). Missing phone numbers and emails are found on each website. Businesses already in your data are never added twice: repeat a search and only new businesses are added.
+- **Google Places billing** – Google charges per *request*, not per business or per field. 1 Text Search request = 1 page of up to 20 businesses (20 dentists = 1 request, 60 = 3), billed at the highest SKU of the fields asked for: phone/website/rating/hours = *Text Search Enterprise* ($35 / 1,000 after 1,000 free a month). Asking only for place IDs is free and unlimited – Setu uses that first to skip businesses you already have. When just one new business is left on a page Setu fetches it with 1 *Place Details* request ($20 / 1,000) instead. Business descriptions (editorial summary) move requests to the *Enterprise + Atmosphere* SKU and are off by default.
 - **Scraped Data** – all scraped businesses, kept separate from your CRM. Bulk *Initiate Process*, *Send outreach*, *Move to Leads*, *Abort*.
 - **Deep audit** – ~45 website checks in 8 areas (technical, performance, on-page SEO, content, conversion, local SEO, trust, social: SSL expiry, redirects, broken links, inner-page crawl, image weight, render-blocking files, schema, NAP consistency, domain age, optional PageSpeed/Core Web Vitals) plus a Google Maps audit benchmarked against competitors.
 - **Premium AI reports** – 15+ page branded PDF: cover, health-score gauges, score-by-area bars, top priorities, competitor review/rating charts, AI-written deep-dive (optionally web-researched by Claude), revenue opportunity with ROI chart, 90-day plan, quick wins, about-us and CTA. Built-in illustrations in your brand colours, or **upload your own doodles/cartoons per section and per prompt**.
@@ -25,8 +26,8 @@ Built for **shared hosting** (cPanel / Hostinger / any PHP host): plain PHP 8 + 
 - **Roles** – *Super admin* (everything incl. modules and other super admins), *Admin / Manager* (all leads, prospecting, automations, templates, settings, team), *Sales person* (own + unassigned leads, add leads, notes, status, appointments). Manage people in **Team & Roles**.
 - **API Usage & Costs** – counts every AI (tokens per model), Google Places, SerpAPI, PageSpeed, WhatsApp, AI voice (Sarvam, Bland, Vapi, Retell), email and Google Calendar call. Shows free limits, month-end projection, estimated cost (USD and your currency) and warns before you go over a free tier. Prices are editable.
 - **Google Calendar (optional)** – bookings stay in Setu; when connected, busy times in Google block slots, each booking becomes a calendar event with a Meet link and invite, cancellations remove it.
-- **Email** – PHP mail by default (works on shared hosting); SMTP optional for better delivery.
-- AI Connection (Claude, ChatGPT, OpenRouter, Gemini, Groq, DeepSeek, custom), automatic background scheduler (no cron needed), one-click GitHub updates, configurable currency (default INR).
+- **Email** – PHP mail by default (works on shared hosting); SMTP optional for better delivery, with ready-made settings for Brevo, Mailjet, SendGrid, Mailgun, Amazon SES, ZeptoMail, Postmark, Resend, SMTP2GO, Elastic Email, Gmail, Zoho, Microsoft 365 and Hostinger (paste the SMTP key / API key as the password).
+- AI Connection (Claude, ChatGPT, OpenRouter, Gemini, Groq, DeepSeek, custom), automatic background scheduler (no cron needed), one-click GitHub updates (Releases only or Latest commit), configurable currency (default INR).
 
 ## Audit report delivery
 Settings → Prospecting → **Report delivery**: send businesses an **online report link** (a branded web page with Download PDF, WhatsApp and Book-a-call buttons), a **PDF attachment**, or **both**. PDFs are made by the free built-in engine – no external service needed. Before writing, the AI runs a research step (live web search with Claude) and the report lists its sources.
@@ -51,9 +52,11 @@ Requirements: PHP 8.0+ with pdo_mysql, curl, mbstring, dom, gd, openssl, and zip
 Each step is a separate short job, so strict `max_execution_time` limits are fine.
 
 ## Releasing an update
+Repository: https://github.com/narendersinghh/Setu-crm
 1. Commit your changes to the update branch (default `main`, configurable in Updates).
 2. Bump `VERSION` and `version.json` (`{"version":"1.0.1","date":"…","notes":["…"]}`).
-3. For database changes add `app/migrations/002_xxx.php` returning an array of SQL statements. It runs automatically after an update.
+3. Publish a GitHub release with the same tag (e.g. `v1.0.1`). Sites on **Releases only** (default) see it then; sites on **Latest commit** see every push.
+4. For database changes add `app/migrations/002_xxx.php` returning an array of SQL statements. It runs automatically after an update.
 Installed sites show a **New** badge on Updates and can update with one click. For a private repository, add a read-only GitHub token in the Updates tab.
 
 ## Structure

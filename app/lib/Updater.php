@@ -2,18 +2,34 @@
 final class Updater{
   const KEEP=['config.php','storage','.htaccess.local','.git','.user.ini','php.ini','error_log'];
   private static function h(){$h=['Accept: application/vnd.github+json','User-Agent: Setu-Updater'];if($t=setting('github_token'))$h[]='Authorization: Bearer '.$t;return $h;}
-  private static function repo(){return trim(setting('update_repo','nilesh-dn/anvesha'),'/ ');}
-  private static function branch(){return setting('update_branch','main');}
+  const REPO='narendersinghh/Setu-crm';
+  static function repo(){return trim(preg_replace('~^https?://github\.com/|\.git$~i','',setting('update_repo',self::REPO)),'/ ');}
+  // release = install published GitHub releases only; commit = install the latest commit of the branch
+  static function mode(){return setting('update_mode','release')==='commit'?'commit':'release';}
+  static function branch(){return setting('update_branch','main');}
   static function check($force=false){
     $c=jd(setting('update_cache'));
-    if(!$force&&$c&&time()-($c['at']??0)<6*3600)return $c;
-    $repo=self::repo();$br=self::branch();
-    $v=http_json('https://api.github.com/repos/'.$repo.'/contents/version.json?ref='.rawurlencode($br),['headers'=>self::h(),'timeout'=>20]);
-    if(isset($v['data']['content']))$v['data']=json_decode(base64_decode($v['data']['content']),true);
-    $cm=http_json('https://api.github.com/repos/'.$repo.'/commits?per_page=15&sha='.rawurlencode($br),['headers'=>self::h(),'timeout'=>20]);
-    $out=['at'=>time(),'ok'=>$v['code']===200,'error'=>$v['code']===200?'':'GitHub returned HTTP '.$v['code'].($v['code']===404?' (repository/branch not found or private – add a GitHub token)':''),'latest'=>$v['data']['version']??null,'notes'=>$v['data']['notes']??[],'date'=>$v['data']['date']??'','commits'=>[]];
-    if($cm['code']===200&&is_array($cm['data']))foreach($cm['data'] as $x)$out['commits'][]=['sha'=>substr($x['sha'],0,7),'msg'=>strtok($x['commit']['message'],"\n"),'date'=>$x['commit']['author']['date'],'author'=>$x['commit']['author']['name'],'url'=>$x['html_url']];
-    $out['available']=$out['latest']&&version_compare($out['latest'],APP_VERSION,'>');
+    if(!$force&&$c&&time()-($c['at']??0)<6*3600&&($c['mode']??'')===self::mode()&&($c['repo']??'')===self::repo())return $c;
+    $repo=self::repo();$br=self::branch();$mode=self::mode();$api='https://api.github.com/repos/'.$repo;
+    $cm=http_json($api.'/commits?per_page=15&sha='.rawurlencode($br),['headers'=>self::h(),'timeout'=>20]);
+    $out=['at'=>time(),'mode'=>$mode,'repo'=>$repo,'ok'=>false,'error'=>'','latest'=>null,'notes'=>[],'date'=>'','commits'=>[],'zip'=>'','sha'=>'','url'=>''];
+    if($cm['code']===200&&is_array($cm['data']))foreach($cm['data'] as $x)$out['commits'][]=['sha'=>substr($x['sha'],0,7),'full'=>$x['sha'],'msg'=>strtok($x['commit']['message'],"\n"),'date'=>$x['commit']['author']['date'],'author'=>$x['commit']['author']['name'],'url'=>$x['html_url']];
+    $err=fn($r,$what)=>'GitHub returned HTTP '.$r['code'].' for '.$what.($r['code']===404?' (repository/branch not found or private – add a GitHub token)':($r['code']===403?' (rate limit – try again later or add a token)':''));
+    if($mode==='release'){
+      $r=http_json($api.'/releases/latest',['headers'=>self::h(),'timeout'=>20]);
+      if($r['code']===200&&!empty($r['data']['tag_name'])){$d=$r['data'];$out['ok']=true;$out['latest']=ltrim($d['tag_name'],'vV');$out['date']=substr($d['published_at']??'',0,10);$out['notes']=array_values(array_filter(array_map(fn($l)=>trim(ltrim(trim($l),'-*# ')),explode("\n",(string)($d['body']??'')))));$out['zip']=$d['zipball_url']??'';$out['url']=$d['html_url']??'';$out['name']=$d['name']??'';
+        $out['available']=version_compare($out['latest'],APP_VERSION,'>');}
+      else $out['error']=$r['code']===404&&$cm['code']===200?'No release published yet on '.$repo.'. Publish one on GitHub (Releases → Draft a new release, tag e.g. v1.1.0) or switch to "Latest commit".':$err($r,'the latest release');}
+    else{
+      if($cm['code']===200&&$out['commits']){
+        $top=$out['commits'][0];$out['ok']=true;$out['sha']=$top['full'];$out['latest']=$top['sha'];$out['date']=substr($top['date'],0,10);$out['notes']=[$top['msg']];$out['zip']=$api.'/zipball/'.$top['full'];$out['url']=$top['url'];
+        $cur=setting('installed_sha');$out['installed_sha']=$cur;
+        $out['available']=$cur===''||strncmp($cur,$top['full'],7)!==0;
+        // version.json on the branch (shown for information)
+        $v=http_json($api.'/contents/version.json?ref='.rawurlencode($br),['headers'=>self::h(),'timeout'=>20]);
+        if(isset($v['data']['content'])&&($vj=json_decode(base64_decode($v['data']['content']),true)))$out['version']=$vj['version']??null;}
+      else $out['error']=$err($cm,'branch "'.$br.'"');}
+    $out['available']=!empty($out['available']);
     Settings::set('update_cache',je($out));
     return $out;}
   static function apply(){
@@ -21,10 +37,14 @@ final class Updater{
     @set_time_limit(600);
     $tmp=STORAGE.'/tmp/upd-'.date('YmdHis');@mkdir($tmp,0755,true);
     $zipf=$tmp.'/src.zip';
-    $r=http('https://api.github.com/repos/'.self::repo().'/zipball/'.rawurlencode(self::branch()),['headers'=>self::h(),'timeout'=>300]);
+    $u=self::check(true);
+    if(!$u['ok']||!$u['zip'])throw new Exception($u['error']?:'Nothing to install.');
+    $r=http($u['zip'],['headers'=>self::h(),'timeout'=>300]);
     if($r['code']!==200||strlen($r['body'])<1000)throw new Exception('Download failed (HTTP '.$r['code'].')');
     file_put_contents($zipf,$r['body']);
-    return self::install($zipf,$tmp);}
+    $n=self::install($zipf,$tmp);
+    if($u['mode']==='commit')Settings::set('installed_sha',$u['sha']);else Settings::set('installed_sha','');
+    return $n;}
   static function install($zipf,$tmp){
     $z=new ZipArchive();
     if($z->open($zipf)!==true)throw new Exception('Downloaded file is not a valid zip');

@@ -39,7 +39,7 @@ final class Queue{
   // Jobs killed by the host (timeout) stay "running": retry them, then fail with a clear message
   static function reapStuck(){
     $min=max(3,(int)setting('job_timeout','6'));
-    foreach(DB::all("SELECT * FROM jobs WHERE status='running' AND locked_at<NOW()-INTERVAL $min MINUTE") as $j){
+    foreach(DB::all("SELECT * FROM jobs WHERE status='running' AND locked_at<NOW()-INTERVAL IF(type='report',GREATEST(?,8),?) MINUTE",[$min,$min]) as $j){
       $msg='Timed out – the server stopped this step after '.$min.' min (often a slow AI model or a host time limit).';
       if($j['attempts']<2&&$j['type']!=='search'){DB::q("UPDATE jobs SET status='pending',locked_at=NULL,error=? WHERE id=?",[$msg.' Retrying…',$j['id']]);continue;}
       self::fail($j,new Exception($msg.' Try again, or choose a faster AI model in AI Connection.'),true);}}
@@ -65,12 +65,37 @@ final class Queue{
       case 'contact':Outreach::contact($id,$p);break;
       case 'auto':Automation::step($id);break;
       case 'call':Voice::call($id,$p);break;}}
+  // Map search, one result page per job. Businesses already in your data (any earlier search or Leads) are skipped.
+  // Google Places: a free IDs-only request first, so pages with nothing new cost nothing and only new businesses are paid for.
   private static function search($cid,$p){
     $c=DB::row('SELECT * FROM campaigns WHERE id=?',[$cid]);
     if(!$c||$c['status']==='stopped')return;
     $q=trim($c['keyword'].($c['location']?' in '.$c['location']:''));
-    $res=Maps::search($q,$p['next']??null,$c['source']);
-    $have=(int)$c['found'];
+    $have=(int)$c['found'];$need=(int)$c['limit_n']-$have;$skip=(int)$c['skipped'];$next=$p['next']??null;
+    if($need<=0){DB::update('campaigns',['status'=>'ready'],'id=?',[$cid]);return;}
+    $dedupe=setting('maps_skip_existing','1')==='1';
+    // place_id => 1 when already in this search, 0 when in another search / Leads
+    $known=function($ids)use($cid,$dedupe){if(!$ids)return [];[$in,$v]=[implode(',',array_fill(0,count($ids),'?')),array_values($ids)];$o=[];foreach(DB::all("SELECT place_id,MAX(campaign_id=?) mine FROM leads WHERE place_id IN ($in) GROUP BY place_id",array_merge([$cid],$v)) as $r)if($r['mine']||$dedupe)$o[$r['place_id']]=(int)$r['mine'];return $o;};
+    if($c['source']==='places'){
+      $page=Maps::ids($q,$next);
+      $kn=$known($page['ids']);
+      foreach($page['ids'] as $id)if(isset($kn[$id])&&!$kn[$id])$skip++;
+      $new=array_slice(array_values(array_diff($page['ids'],array_keys($kn))),0,$need);
+      $items=[];
+      if($new){
+        // Cheapest way to fetch only the new ones: 1 Text Search page, or 1 Place Details request per business
+        $P=Usage::prices();$pt=(float)($P[Maps::sku()]['price']??0.035);$pd=(float)($P[Maps::sku(true)]['price']??0.02);
+        $full=null;
+        if(count($new)*$pd>=$pt){try{$full=Maps::places($q,$next);}catch(Throwable $e){logmsg('Places page fetch, using details instead: '.$e->getMessage());}}
+        if($full){$by=array_column($full['items'],null,'place_id');foreach($new as $id)if(isset($by[$id]))$items[]=$by[$id];}
+        $miss=array_diff($new,array_column($items,'place_id'));
+        foreach($miss as $id)$items[]=Maps::details($id);}
+      $res=['items'=>$items,'next'=>$page['next'],'more'=>(bool)$page['ids']];}
+    else{
+      $r=Maps::search($q,$next,$c['source']);
+      $kn=$known(array_column($r['items'],'place_id'));$items=[];
+      foreach($r['items'] as $it){if(isset($kn[$it['place_id']])){if(!$kn[$it['place_id']])$skip++;continue;}$items[]=$it;}
+      $res=['items'=>$items,'next'=>$r['next'],'more'=>(bool)$r['items']];}
     foreach($res['items'] as $it){
       if($have>=$c['limit_n'])break;
       if(DB::val('SELECT id FROM leads WHERE campaign_id=? AND place_id=?',[$cid,$it['place_id']]))continue;
@@ -78,9 +103,10 @@ final class Queue{
       $lid=DB::insert('leads',['campaign_id'=>$cid,'position'=>$have,'place_id'=>$it['place_id'],'name'=>mb_substr($it['name'],0,250),'category'=>mb_substr($it['category'],0,180),'address'=>mb_substr($it['address'],0,490),'city'=>mb_substr($it['city']?:$c['location'],0,110),'phone'=>$it['phone'],'phone_source'=>$it['phone']?'maps':'','website'=>mb_substr($it['website'],0,490),'rating'=>$it['rating'],'reviews'=>(int)$it['reviews'],'maps_url'=>mb_substr($it['maps_url'],0,490),'lat'=>$it['lat'],'lng'=>$it['lng'],'raw'=>je($it['raw']),'source'=>'maps','source_detail'=>mb_substr($q,0,180),'token'=>token(16),'last_activity'=>date('Y-m-d H:i:s')]);
       event($lid,'found','Found on Google Maps at position #'.$have.' for "'.$q.'"','maps');
       if($it['website'])self::push('enrich',$lid);}
-    DB::update('campaigns',['found'=>$have],'id=?',[$cid]);
-    if($have<$c['limit_n']&&!empty($res['next'])&&$res['items'])self::push('search',$cid,['next'=>$res['next']],date('Y-m-d H:i:s',time()+($c['source']==='places'?2:0)));
-    else DB::update('campaigns',['status'=>'ready'],'id=?',[$cid]);}
+    $u=['found'=>$have,'skipped'=>$skip];
+    if($have<$c['limit_n']&&!empty($res['next'])&&$res['more'])self::push('search',$cid,['next'=>$res['next']],date('Y-m-d H:i:s',time()+($c['source']==='places'?2:0)));
+    else $u['status']='ready';
+    DB::update('campaigns',$u,'id=?',[$cid]);}
   static function enrich($lid){
     $l=DB::row('SELECT * FROM leads WHERE id=?',[$lid]);
     if(!$l||!$l['website'])return;
@@ -106,10 +132,26 @@ final class Queue{
     event($lid,'audited',($l['website']?'Website score '.$a['website']['score'].'/100 · ':'No website · ').'Google Maps score '.$a['map']['score'].'/100');
     self::progress($lid,58,'Audit complete – queued for AI report');
     self::push('report',$lid,$p);}
+  // Report in three short steps (each its own job, so slow AI calls never run into host time limits):
+  // research (skipped when off or cached) → AI writes the report → PDF is rendered
   private static function report($lid,$p){
-    DB::update('leads',['stage'=>'reporting'],'id=?',[$lid]);
-    Report::generate($lid,$p,fn($pct,$m)=>self::progress($lid,$pct,$m));
+    $ph=$p['phase']??'research';
+    if($ph==='research'){
+      DB::update('leads',['stage'=>'reporting'],'id=?',[$lid]);
+      self::progress($lid,60,'Preparing audit data for the AI');
+      $brief=Report::research($lid,fn($pct,$m)=>self::progress($lid,$pct,$m));
+      self::progress($lid,68,'Queued: AI is about to write the report');
+      self::push('report',$lid,['phase'=>'write','brief'=>$brief]+$p);return;}
+    if($ph==='write'){
+      $rid=Report::write($lid,$p,(array)($p['brief']??[]),fn($pct,$m)=>self::progress($lid,$pct,$m));
+      unset($p['brief']);
+      if(report_mode()!=='link'){self::progress($lid,88,'Queued: designing the PDF');self::push('report',$lid,['phase'=>'pdf','rid'=>$rid]+$p);return;}
+      self::ready($lid,$p);return;}
+    $r=DB::row('SELECT * FROM reports WHERE id=?',[(int)($p['rid']??0)]);
+    if($r){self::progress($lid,92,'Rendering PDF pages: charts, illustrations & layout');@ini_set('memory_limit','512M');Report::pdfFile($r);}
+    self::ready($lid,$p);}
+  private static function ready($lid,$p){
     DB::update('leads',['progress'=>100,'progress_msg'=>'Report ready'],'id=?',[$lid]);
-    stage($lid,'report_ready','PDF report generated');
+    stage($lid,'report_ready','Report generated');
     Automation::fire('report_ready',$lid);
     if(!empty($p['auto']))Outreach::schedule($lid);}}
