@@ -4,7 +4,7 @@ require __DIR__.'/app/bootstrap.php';
 session_write_close();
 if(($_SERVER['REQUEST_METHOD']??'')==='GET'){
   $vt=setting('wa_verify_token');
-  if($vt&&($_GET['hub_verify_token']??'')===$vt){echo $_GET['hub_challenge']??'';exit;}
+  if($vt&&hash_equals($vt,(string)($_GET['hub_verify_token']??''))){header('Content-Type: text/plain');echo preg_replace('/[^\w.-]/','',(string)($_GET['hub_challenge']??''));exit;}
   http_response_code(403);exit('Invalid verify token');}
 $raw=file_get_contents('php://input');
 if($sec=setting('wa_app_secret')){$sig=$_SERVER['HTTP_X_HUB_SIGNATURE_256']??'';if(!hash_equals('sha256='.hash_hmac('sha256',$raw,$sec),$sig)){http_response_code(401);exit;}}
@@ -27,7 +27,7 @@ foreach($d['entry']??[] as $en)foreach($en['changes']??[] as $ch){
     if(strlen($from)<8)continue;
     $text=$msg['text']['body']??($msg['button']['text']??('['.($msg['type']??'message').']'));
     $tail=substr($from,-10);
-    foreach(DB::all("SELECT id,phone FROM leads WHERE phone<>'' AND wa_status<>'' ORDER BY id DESC LIMIT 2000") as $l){
+    foreach(DB::all("SELECT id,phone FROM leads WHERE wa_status<>'' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'(',''),')',''),'.','') LIKE ? ORDER BY id DESC LIMIT 20",['%'.$tail]) as $l){
       if(substr(phone_norm($l['phone']),-10)!==$tail)continue;
       DB::insert('messages',['lead_id'=>$l['id'],'channel'=>'whatsapp','direction'=>'in','status'=>'received','ext_id'=>mb_substr($msg['id']??'',0,190),'body'=>$text]);
       Outreach::markReplied($l['id'],'whatsapp',$text);}}}

@@ -35,7 +35,7 @@ final class Auditor{
     if($https){
       $days=self::sslDays($host);
       if($days!==null){$m['ssl_days']=$days;self::c($ch,'SSL certificate validity',$days>20?'pass':($days>0?'warn':'fail'),$days>0?'Certificate valid for '.$days.' more days.':'Certificate has expired – visitors see a security warning.',1,'Technical');}
-      $hr=http('http://'.$host.'/',['timeout'=>10,'max'=>50000]);
+      $hr=http('http://'.$host.'/',['timeout'=>10,'max'=>50000,'public'=>true]);
       if($hr['code']){$ok=stripos($hr['url'],'https://')===0;self::c($ch,'HTTP → HTTPS redirect',$ok?'pass':'warn',$ok?'Visitors typing http:// are moved to the secure site.':'The insecure http:// version does not redirect to https:// – duplicate site in Google.',1,'Technical');}}
     if($https&&preg_match('~(src|href)=["\']http://(?!www\.w3\.org)~i',preg_replace('~<a\s[^>]*>~i','',$h)))self::c($ch,'Mixed content','warn','Some images/scripts load over insecure http:// on a secure page – browsers may block them.',1,'Technical');
     $vp=$q("//meta[@name='viewport']")->length>0;
@@ -46,9 +46,9 @@ final class Auditor{
     self::c($ch,'Language declared',$lang?'pass':'warn',$lang?'Page language is declared.':'No language attribute – search engines must guess the language.',1,'Technical');
     $fav=$q("//link[contains(@rel,'icon')]")->length>0;
     self::c($ch,'Favicon',$fav?'pass':'warn',$fav?'Favicon present.':'No favicon – looks unprofessional in browser tabs and Google mobile results.',1,'Technical');
-    $rb=http($root.'/robots.txt',['timeout'=>10,'max'=>200000]);$hasRobots=$rb['code']===200&&stripos($rb['type'],'html')===false;
+    $rb=http($root.'/robots.txt',['timeout'=>10,'max'=>200000,'public'=>true]);$hasRobots=$rb['code']===200&&stripos($rb['type'],'html')===false;
     self::c($ch,'robots.txt',$hasRobots?'pass':'warn',$hasRobots?'robots.txt found.':'No robots.txt file.',1,'Technical');
-    $sm=http($root.'/sitemap.xml',['timeout'=>10,'max'=>200000]);$hasSm=($sm['code']===200&&(stripos($sm['body'],'<urlset')!==false||stripos($sm['body'],'<sitemapindex')!==false))||($hasRobots&&stripos($rb['body'],'sitemap:')!==false);
+    $sm=http($root.'/sitemap.xml',['timeout'=>10,'max'=>200000,'public'=>true]);$hasSm=($sm['code']===200&&(stripos($sm['body'],'<urlset')!==false||stripos($sm['body'],'<sitemapindex')!==false))||($hasRobots&&stripos($rb['body'],'sitemap:')!==false);
     self::c($ch,'XML sitemap',$hasSm?'pass':'fail',$hasSm?'XML sitemap found.':'No XML sitemap – Google may miss pages.',2,'Technical');
     if(preg_match('~<meta[^>]+name=["\']robots["\'][^>]+noindex~i',$h))self::c($ch,'Search engine indexing','fail','Page has a "noindex" tag – it is hidden from Google!',5,'Technical');
     // ---------- Performance
@@ -136,7 +136,7 @@ final class Auditor{
       $pick=array_slice(array_keys(array_filter($links,fn($t,$u)=>$u!==$final&&$u!==rtrim($final,'/')&&!preg_match('~\.(pdf|jpe?g|png|zip)$|/cdn-cgi/|wp-login|/feed/?$|#~i',$u),ARRAY_FILTER_USE_BOTH)),0,10);
       $bad=[];$noDesc=0;$titles=[$title];$crawled=0;
       foreach($pick as $i=>$u){
-        $pr=http($u,['timeout'=>8,'max'=>150000]);
+        $pr=http($u,['timeout'=>8,'max'=>150000,'public'=>true]);
         if($pr['code']>=400||$pr['code']===0){$bad[]=$u;continue;}
         if($i<5){$crawled++;if(!preg_match('~<meta[^>]+name=["\']description["\']~i',$pr['body']))$noDesc++;if(preg_match('~<title[^>]*>(.*?)</title>~is',$pr['body'],$tm))$titles[]=trim($tm[1]);}}
       $m['crawled']=$crawled;$m['broken']=count($bad);
@@ -146,6 +146,7 @@ final class Auditor{
     $P(88,'Website audit complete');
     return ['score'=>self::score($ch),'checks'=>$ch,'meta'=>$m,'cats'=>self::cats($ch,self::WEB_CATS)];}
   private static function sslDays($host){
+    if(!public_ip('https://'.$host))return null;
     $ctx=stream_context_create(['ssl'=>['capture_peer_cert'=>true,'verify_peer'=>false,'verify_peer_name'=>false,'SNI_enabled'=>true,'peer_name'=>$host]]);
     $c=@stream_socket_client('ssl://'.$host.':443',$en,$es,8,STREAM_CLIENT_CONNECT,$ctx);
     if(!$c)return null;

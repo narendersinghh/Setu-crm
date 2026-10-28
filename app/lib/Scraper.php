@@ -5,7 +5,7 @@ final class Scraper{
     if($u==='')return '';
     if(!preg_match('~^https?://~i',$u))$u='http://'.$u;
     return $u;}
-  static function fetch($u){return http(self::norm($u),['timeout'=>25,'max'=>3000000]);}
+  static function fetch($u){return http(self::norm($u),['timeout'=>25,'max'=>3000000,'public'=>true]);}
   // Find phones, emails and social links on a website (home + contact page)
   static function contacts($site){
     $res=['phones'=>[],'emails'=>[],'socials'=>[],'whatsapp'=>''];

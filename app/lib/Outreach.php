@@ -24,9 +24,11 @@ final class Outreach{
   static function csv($rows){
     header('Content-Type: text/csv; charset=utf-8');header('Content-Disposition: attachment; filename="setu-'.date('Ymd-His').'.csv"');
     $o=fopen('php://output','w');fwrite($o,"\xEF\xBB\xBF");
+    // Cells starting with = + - @ would run as formulas in Excel/Sheets
+    $cl=fn($r)=>array_map(fn($v)=>is_string($v)&&$v!==''&&strpbrk($v[0],"=+-@\t\r")!==false&&!is_numeric($v)?"'".$v:$v,$r);
     $fs=DB::all('SELECT fkey,label FROM fields ORDER BY sort,id');
     fputcsv($o,array_merge(['Name','Contact person','Category','Address','City','Phone','Alt phone','Email','Website','Source','Source detail','Status','Service','Deal value','Tags','Follow-up','Rating','Reviews','Maps URL','Website score','Maps score','Outreach stage','Email status','WhatsApp status','Replied at','Created'],array_column($fs,'label')));
-    foreach($rows as $l){$c=jd($l['custom']);fputcsv($o,array_merge([$l['name'],$l['contact_name'],$l['category'],$l['address'],$l['city'],$l['phone'],$l['alt_phone'],$l['email'],$l['website'],$l['source'],$l['source_detail'],crm_statuses()[$l['status']][0]??$l['status'],$l['service'],$l['deal_value'],$l['tags'],$l['follow_up_at'],$l['rating'],$l['reviews'],$l['maps_url'],$l['web_score'],$l['map_score'],stages()[$l['stage']][0]??$l['stage'],$l['email_status'],$l['wa_status'],$l['replied_at'],$l['created_at']],array_map(fn($f)=>is_array($c[$f['fkey']]??'')?implode(', ',$c[$f['fkey']]):($c[$f['fkey']]??''),$fs)));}
+    foreach($rows as $l){$c=jd($l['custom']);fputcsv($o,$cl(array_merge([$l['name'],$l['contact_name'],$l['category'],$l['address'],$l['city'],$l['phone'],$l['alt_phone'],$l['email'],$l['website'],$l['source'],$l['source_detail'],crm_statuses()[$l['status']][0]??$l['status'],$l['service'],$l['deal_value'],$l['tags'],$l['follow_up_at'],$l['rating'],$l['reviews'],$l['maps_url'],$l['web_score'],$l['map_score'],stages()[$l['stage']][0]??$l['stage'],$l['email_status'],$l['wa_status'],$l['replied_at'],$l['created_at']],array_map(fn($f)=>is_array($c[$f['fkey']]??'')?implode(', ',$c[$f['fkey']]):($c[$f['fkey']]??''),$fs))));}
     exit;}
   static function schedule($lid,$now=false){
     $gap=max(0,(int)setting('send_gap','90'));

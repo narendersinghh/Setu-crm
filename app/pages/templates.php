@@ -25,7 +25,7 @@ if(is_post()){
       if(!is_uploaded_file($files['tmp_name'][$i]))continue;
       $ext=strtolower(pathinfo($nm,PATHINFO_EXTENSION));
       if(!in_array($ext,['png','jpg','jpeg','webp','svg'],true))continue;
-      if($ext==='svg'&&preg_match('~<script|on\w+=~i',file_get_contents($files['tmp_name'][$i])))continue;
+      if($ext==='svg'&&preg_match('~<script|\bon\w+\s*=|javascript:|<foreignObject|<iframe|<embed|<object|<!ENTITY|<use[^>]+href=["\']?(?!#)~i',file_get_contents($files['tmp_name'][$i])))continue;
       $dst='assets/uploads/doodles/'.token(6).'.'.$ext;
       move_uploaded_file($files['tmp_name'][$i],ROOT.'/'.$dst);
       DB::insert('assets',['name'=>mb_substr(trim($_POST['name']??'')?:pathinfo($nm,PATHINFO_FILENAME),0,150),'file'=>$dst,'placement'=>isset(Report::PLACES[$_POST['placement']??''])?$_POST['placement']:'any','prompt_id'=>(int)($_POST['prompt_id']??0)?:null]);$n++;}

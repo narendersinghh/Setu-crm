@@ -40,6 +40,12 @@ Use **one** method per form:
 Don't combine the webhook and the script for the same form – each enquiry would arrive twice (duplicates are merged by phone/email, but the activity doubles).
 Field mapping: common names (name, phone/mobile/whatsapp, email, company, city, service, budget, message) and your custom field keys are matched automatically; anything else goes to the enquiry notes. After the first submission every field appears under **Settings → CRM → Lead capture → Field mapping**, where you can send it to any field or ignore it.
 
+## Security
+- Website audits and contact scans only fetch public internet addresses (private, loopback and cloud-metadata IPs are blocked on every redirect).
+- Login is throttled per IP address (10 failures → 15 minutes); public lead forms and the booking page are rate-limited.
+- CSRF tokens on every form (logout included), hardened session cookies, no open redirects, CSV exports protected against formula injection, API keys encrypted in the database.
+- On Nginx hosts (no .htaccess) block `/app`, `/storage` and `config.php` in the server config; log file names are randomised per install.
+
 ## Install (shared hosting)
 1. Upload the files to `public_html` or a sub-domain folder (Download ZIP from GitHub → File Manager → Extract), or use cPanel → Git Version Control.
 2. Create a MySQL database and user (cPanel → MySQL Database Wizard, ALL PRIVILEGES).
