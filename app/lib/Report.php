@@ -126,7 +126,7 @@ TXT;
   static function isDark($hex){$h=ltrim((string)$hex,'#');if(strlen($h)===3)$h=preg_replace('/./','$0$0',$h);if(!ctype_xdigit($h)||strlen($h)!==6)return true;[$r,$g,$b]=array_map('hexdec',str_split($h,2));return .299*$r+.587*$g+.114*$b<150;}
   // Best logo file for a background colour: [relative path, chip colour] – chip is set when only the other version exists, so it stays readable
   static function logoPick($bg){
-    $dark=self::isDark($bg);$d=setting('company_logo','assets/img/default-logo.png');$l=setting('company_logo_light');
+    $dark=self::isDark($bg);$d=setting('company_logo');$l=setting('company_logo_light');
     $ok=fn($f)=>$f&&is_file(ROOT.'/'.ltrim($f,'/'));
     if($dark&&$ok($d))return [$d,''];if(!$dark&&$ok($l))return [$l,''];
     if($dark&&$ok($l))return [$l,'#FFFFFF'];if(!$dark&&$ok($d))return [$d,'#0B0B0B'];

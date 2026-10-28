@@ -12,6 +12,5 @@ return [
 "CREATE TABLE IF NOT EXISTS assets (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,name VARCHAR(160) NOT NULL,file VARCHAR(255) NOT NULL,placement VARCHAR(20) NOT NULL DEFAULT 'any',prompt_id INT UNSIGNED NULL,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
 "UPDATE prompts SET content=REPLACE(content,'\\n\\nReport link: {{report_link}}','') WHERE type IN ('whatsapp','whatsapp_noweb') AND is_default=1",
 "UPDATE prompts SET content=REPLACE(REPLACE(content,' You can also view it here: {{report_link}}',''),' You can also view the report here: {{report_link}}','') WHERE type IN ('email','email_noweb') AND is_default=1",
-"UPDATE settings SET v='Digital Nil Team' WHERE k='sender_name' AND v=''",
 function(){Seed::upgradeReports();},
 ];
