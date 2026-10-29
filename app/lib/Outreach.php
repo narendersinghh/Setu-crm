@@ -67,7 +67,7 @@ final class Outreach{
     $ok=0;$err=[];
     $ch=$p['channels']??['email','whatsapp'];
     if(in_array('email',$ch,true)&&setting('send_email')==='1'&&$l['email']&&$l['email_status']!=='sent'){
-      if(!Mailer::ready()){$err[]='Email: SMTP not configured';event($lid,'error','Email not sent – configure SMTP in Settings → Email','email');}
+      if(!Mailer::ready()){$err[]='Email: not set up';event($lid,'error','Email not sent – set up email in Settings → Email','email');}
       else try{
         [$sub,$body]=self::message('email'.$nw,$l);
         if(report_mode()!=='pdf'&&strpos($body,'{{report_link}}')===false)$body.="\n\nYour report: {{report_link}}";

@@ -95,7 +95,7 @@ final class Usage{
       case 'web_search':return $ai==='anthropic'&&$has('ai_key_anthropic')&&setting('ai_web_research','1')==='1'?['Active','green']:['Off','gray'];
       case 'whatsapp':return setting('wa_provider')==='cloud'?['Active','green']:['Not added','gray'];
       case 'whatsapp_api':return setting('wa_provider')==='generic'?['Active','green']:['Not added','gray'];
-      case 'email':return Mailer::ready()?['Active · '.(Mailer::smtp()?'SMTP':'PHP mail'),'green']:['Not set up','amber'];
+      case 'email':return Mailer::ready()?['Active · '.Mailer::label(),'green']:['Not set up','amber'];
       case 'gcal':return GCal::ready()?['Connected','green']:['Not connected','gray'];}
     if(strpos($k,'google_places')===0)return !$has('google_api_key')?['Not added','gray']:($k==='google_places_ids'?['Free · automatic','green']:(strpos($k,'_atmo')!==false?(Maps::atmo()?['Active','green']:['Off','gray']):(Maps::atmo()?['Off','gray']:(setting('maps_source','places')==='places'?['Active','green']:['Key added','teal']))));
     if(strpos($k,'voice_')===0)return setting('voice_provider')===substr($k,6)?(Voice::ready()?['Active','green']:['Incomplete','amber']):['Not added','gray'];

@@ -62,7 +62,7 @@ final class Automation{
         $text=tpl($s['text']??'',$vars);
         if($t==='booking'&&strpos($text,$vars['booking_link'])===false)$text.="\n\n".$vars['booking_link'];
         if($t==='booking'&&($s['ch']??'whatsapp')==='email'){
-          if(!$l['email']||!Mailer::ready())return ['msg'=>'Skipped booking email – no email or SMTP'];
+          if(!$l['email']||!Mailer::ready())return ['msg'=>'Skipped booking email – no email address or email not set up'];
           Mailer::send($l['email'],tpl($s['subject']??'Book a time with {{agency_name}}',$vars),Mailer::html($text),$text);
           DB::insert('messages',['lead_id'=>$l['id'],'channel'=>'email','status'=>'sent','subject'=>'Booking link','body'=>$text]);
           event($l['id'],'sent','Booking link sent by email','email');return ['msg'=>'Booking link emailed'];}
@@ -74,7 +74,7 @@ final class Automation{
         event($l['id'],'sent',($t==='booking'?'Booking link':'WhatsApp message').' sent by automation','whatsapp');return ['msg'=>'WhatsApp sent'];
       case 'email':
         if(!$l['email'])return ['msg'=>'Skipped email – no email address'];
-        if(!Mailer::ready())throw new Exception('SMTP not configured');
+        if(!Mailer::ready())throw new Exception('Email is not set up (Settings → Messaging → Email)');
         $sub=tpl($s['subject']??'',$vars);$text=tpl($s['body']??'',$vars);$tk=token(12);
         $att=[];if(!empty($s['attach'])&&DB::val('SELECT id FROM reports WHERE lead_id=?',[$l['id']]))foreach(Outreach::files($l) as $f)$att[$f['name']]=$f['path'];
         Mailer::send($l['email'],$sub,Mailer::html($text,base_url('track.php?t='.$tk)),$text,$att);
@@ -90,7 +90,7 @@ final class Automation{
       case 'followup':$at=date('Y-m-d H:i:s',time()+max(1,(int)($s['n']??1))*['hours'=>3600,'days'=>86400][$s['u']??'days']);DB::update('leads',['follow_up_at'=>$at],'id=?',[$l['id']]);event($l['id'],'note','Follow-up set for '.date('d M, h:i A',strtotime($at)));return ['msg'=>'Follow-up '.$at];
       case 'notify':
         $to=$s['to']??''?:setting('company_email');
-        if(!Mailer::ready()||!$to)return ['msg'=>'Skipped team email – SMTP not configured'];
+        if(!Mailer::ready()||!$to)return ['msg'=>'Skipped team email – email not set up'];
         $text=tpl($s['text']??'New lead: {{business_name}} – {{phone}} {{email}}',$vars)."\n\n".base_url('index.php?r=lead&id='.$l['id']);Mailer::send($to,'Setu: '.tpl($s['subject']??'Lead update – {{business_name}}',$vars),Mailer::html($text),$text);
         return ['msg'=>'Team notified ('.$to.')'];
       case 'report':Outreach::initiate([$l['id']],['auto'=>!empty($s['contact'])]);return ['msg'=>'Audit & report started'];
