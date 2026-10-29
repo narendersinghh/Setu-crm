@@ -1,12 +1,14 @@
 <?php
-final class Aborted extends Exception{}
 final class Queue{
   const LEAD_JOBS="'enrich','audit','report','contact'";
   static function push($type,$ref,$payload=[],$at=null){
     return DB::insert('jobs',['type'=>$type,'ref_id'=>(int)$ref,'payload'=>je($payload),'run_after'=>$at?:date('Y-m-d H:i:s')]);}
   static function due(){return (int)DB::val("SELECT COUNT(*) FROM jobs WHERE status='pending' AND run_after<=NOW()");}
+  static function dueLong(){return (int)DB::val("SELECT COUNT(*) FROM jobs WHERE status='pending' AND run_after<=NOW() AND type IN ('audit','report')");}
   // Progress shown on the lead row and in the activity panel
   static function progress($lid,$pct,$msg){
+    // (the AI call itself is logged as its own step with tokens and cost)
+    if(Trace::$lead===(int)$lid&&$msg!==Trace::$msg&&strncmp($msg,'AI is ',6))Trace::step($msg);
     DB::update('leads',['progress'=>max(0,min(100,(int)$pct)),'progress_msg'=>mb_substr($msg,0,180)],'id=?',[$lid]);
     if((int)DB::val('SELECT abort_flag FROM leads WHERE id=?',[$lid]))throw new Aborted('Stopped by user');}
   // Stop everything for these leads: pending jobs are cancelled, a running job stops at its next step
@@ -21,19 +23,29 @@ final class Queue{
       DB::update('leads',['abort_flag'=>1,'stage'=>$back,'progress'=>0,'progress_msg'=>'Stopped'],'id=?',[$l['id']]);
       event($l['id'],'error','Process stopped manually');$n++;}
     return $n;}
-  static function work($budget=null){
+  // Heading of a job in "View process"
+  static function title($j){$p=jd($j['payload']);$a=(int)$j['attempts']>1?' (attempt '.(int)$j['attempts'].')':'';
+    if($j['type']==='audit')return 'Audit started'.$a;
+    if($j['type']==='contact')return 'Sending the report'.$a;
+    return ['research'=>'Report · step 1 of 3: market research','write'=>'Report · step 2 of 3: AI writes the report','pdf'=>'Report · step 3 of 3: PDF design'][$p['phase']??'research'].$a;}
+  const LONG=['audit','report'];
+  // $quick=true: only short jobs (searches, contact scans, sends, automations) – used by the browser poll,
+  // so slow AI steps always run in the detached background worker where web-server time limits do not apply
+  static function work($budget=null,$quick=false){
     $budget=$budget?:(int)setting('queue_budget','20');
     @set_time_limit(max(300,$budget+280));
     @ignore_user_abort(true);
     $t0=microtime(true);$n=0;
     self::reapStuck();
     while(microtime(true)-$t0<$budget){
-      $j=DB::row("SELECT * FROM jobs WHERE status='pending' AND run_after<=NOW() ORDER BY FIELD(type,'search','enrich','auto','audit','report','contact'),id LIMIT 1");
+      $j=DB::row("SELECT * FROM jobs WHERE status='pending' AND run_after<=NOW()".($quick?" AND type NOT IN ('audit','report')":'')." ORDER BY FIELD(type,'search','enrich','auto','audit','report','contact'),id LIMIT 1");
       if(!$j)break;
       if(!DB::q("UPDATE jobs SET status='running',locked_at=NOW(),attempts=attempts+1 WHERE id=? AND status='pending'",[$j['id']])->rowCount())continue;
-      try{self::handle($j);DB::q("UPDATE jobs SET status='done',error=NULL WHERE id=? AND status='running'",[$j['id']]);}
-      catch(Aborted $e){DB::q("UPDATE jobs SET status='cancelled',error=? WHERE id=?",[$e->getMessage(),$j['id']]);}
-      catch(Throwable $e){self::fail($j,$e);}
+      $tr=in_array($j['type'],['audit','report','contact'],true);
+      if($tr)Trace::begin($j['ref_id'],$j['id'],self::title($j));
+      try{self::handle($j);DB::q("UPDATE jobs SET status='done',error=NULL WHERE id=? AND status='running'",[$j['id']]);if($tr)Trace::end();}
+      catch(Aborted $e){DB::q("UPDATE jobs SET status='cancelled',error=? WHERE id=?",[$e->getMessage(),$j['id']]);if($tr){Trace::step('Stopped by user','step');Trace::end('err','The process was aborted.');}}
+      catch(Throwable $e){if($tr){Trace::close('err',$e->getMessage());Trace::step(((int)$j['attempts']<2&&!in_array($j['type'],['search','auto'],true)?'Error – will retry in 1 minute':'Failed').': '.mb_strimwidth($e->getMessage(),0,140,'…'),'step');Trace::end('err',$e->getMessage());}self::fail($j,$e);}
       $n++;}
     return $n;}
   // Jobs killed by the host (timeout) stay "running": retry them, then fail with a clear message
@@ -41,6 +53,7 @@ final class Queue{
     $min=max(3,(int)setting('job_timeout','6'));
     foreach(DB::all("SELECT * FROM jobs WHERE status='running' AND locked_at<NOW()-INTERVAL IF(type='report',GREATEST(?,8),?) MINUTE",[$min,$min]) as $j){
       $msg='Timed out – the server stopped this step after '.$min.' min (often a slow AI model or a host time limit).';
+      if(in_array($j['type'],['audit','report','contact'],true)){DB::q("UPDATE job_steps SET status='err',detail=? WHERE job_id=? AND status='run'",['The server stopped this step (time limit or crash).',$j['id']]);DB::insert('job_steps',['lead_id'=>$j['ref_id'],'job_id'=>$j['id'],'kind'=>'step','step'=>mb_substr($msg,0,190),'status'=>'err']);}
       if($j['attempts']<2&&$j['type']!=='search'){DB::q("UPDATE jobs SET status='pending',locked_at=NULL,error=? WHERE id=?",[$msg.' Retrying…',$j['id']]);continue;}
       self::fail($j,new Exception($msg.' Try again, or choose a faster AI model in AI Connection.'),true);}}
   private static function fail($j,$e,$final=false){

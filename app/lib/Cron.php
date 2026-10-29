@@ -36,6 +36,18 @@ final class Cron{
         if(setting('cron_url')!==$u)Settings::set('cron_url',$u);}
       self::async(rtrim(setting('cron_url',base_url('')),'/').'/cron.php?key='.urlencode(setting('cron_key')).'&chain=1');}
     catch(Throwable $e){logmsg('Cron kick: '.$e->getMessage());}}
+  static function workers(){return max(1,min(4,(int)setting('workers','3')));}
+  static function lock($i){return STORAGE.'/tmp/cron'.($i?'-'.$i:'').'.lock';}
+  // Start one more background worker when AI audits/reports are waiting and a worker slot is free
+  static function spawn(){
+    try{
+      if(setting('scheduler','auto')==='off'||time()-(int)setting('cron_spawn','0')<8||!Queue::dueLong())return false;
+      $free=false;for($i=0;$i<self::workers();$i++){$f=@fopen(self::lock($i),'c');if($f&&flock($f,LOCK_EX|LOCK_NB)){flock($f,LOCK_UN);$free=true;}if($f)fclose($f);if($free)break;}
+      if(!$free)return false;
+      Settings::set('cron_spawn',time());
+      self::async(rtrim(setting('cron_url',base_url('')),'/').'/cron.php?key='.urlencode(setting('cron_key')).'&chain=1');
+      return true;}
+    catch(Throwable $e){return false;}}
   static function async($url){
     $ch=curl_init($url);
     curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT_MS=>1500,CURLOPT_CONNECTTIMEOUT_MS=>1500,CURLOPT_NOSIGNAL=>1,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_USERAGENT=>'Setu-Scheduler']);

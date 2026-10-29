@@ -4,11 +4,21 @@ session_write_close();
 if($do==='tick'){
   $n=0;
   Cron::kick();
-  if(is_post()&&Queue::due())$n=Queue::work();
+  // Short jobs only here; AI audits/reports run in detached background workers (no web-server time limits)
+  if(is_post()&&Queue::due())$n=Queue::work(8,true);
+  if(is_post())Cron::spawn();
   if(is_post()&&time()-(int)setting('scan_last','0')>120){Settings::set('scan_last',time());try{Automation::scan();Booking::remind();}catch(Throwable $e){}}
   $s=DB::row("SELECT SUM(status='pending' AND run_after<=NOW()) due,SUM(status='pending' AND run_after>NOW()) later,SUM(status='running') running FROM jobs WHERE status IN ('pending','running')");
   $next=DB::val("SELECT MIN(run_after) FROM jobs WHERE status='pending' AND run_after>NOW()");
   json_out(['done'=>$n,'due'=>(int)$s['due'],'later'=>(int)$s['later'],'running'=>(int)$s['running'],'next'=>$next?max(1,strtotime($next)-time()):null]);}
+// Live process log of one lead (View process popup and the lead page progress box)
+if($do==='process'){
+  $l=DB::row('SELECT id,name,stage,progress,progress_msg,last_error,is_lead,assigned_to FROM leads WHERE id=?',[(int)($_GET['id']??0)]);
+  if(!$l||!lead_ok($l)||(!$l['is_lead']&&!can('prospecting')))json_out(['error'=>'forbidden'],403);
+  $busy=in_array($l['stage'],['queued','auditing','reporting','contacting'],true);
+  $o=['id'=>(int)$l['id'],'name'=>$l['name'],'stage'=>$l['stage'],'stage_label'=>stages()[$l['stage']][0]??$l['stage'],'busy'=>$busy,'progress'=>(int)$l['progress'],'msg'=>$l['progress_msg'],'error'=>$l['stage']==='failed'?$l['last_error']:'','can_abort'=>can('settings')];
+  if(empty($_GET['lite']))$o+=Trace::view($l['id']);
+  json_out($o);}
 if($do==='activity'){
   if(!can('settings'))json_out(['error'=>'forbidden'],403);
   $active=DB::all("SELECT id,name,stage,progress,progress_msg,last_error,source FROM leads WHERE stage IN ('queued','auditing','reporting','contacting') ORDER BY last_activity DESC LIMIT 60");

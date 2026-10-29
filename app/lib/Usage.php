@@ -39,8 +39,8 @@ final class Usage{
       $p=self::prices();$cost=0;
       $u=self::catalog()[$service][2]??'calls';if(($p[$service]??null)!==null&&$u!=='tokens')$cost=($u==='minutes'?$in/60:($in?:$calls))*(float)$p[$service]['price'];
       if($model!==null){$mp=$p['_models'][$model]??$p['_models'][preg_replace('~^.*/~','',$model)]??null;if($mp)$cost=$in/1e6*(float)$mp['in']+$out/1e6*(float)$mp['out'];}
-      DB::q('INSERT INTO api_usage (day,service,op,calls,units_in,units_out,cost,errors) VALUES (CURDATE(),?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE calls=calls+VALUES(calls),units_in=units_in+VALUES(units_in),units_out=units_out+VALUES(units_out),cost=cost+VALUES(cost),errors=errors+VALUES(errors)',[$service,mb_substr((string)$op,0,40),$calls,(int)$in,(int)$out,round($cost,6),$err?1:0]);}
-    catch(Throwable $e){}}
+      DB::q('INSERT INTO api_usage (day,service,op,calls,units_in,units_out,cost,errors) VALUES (CURDATE(),?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE calls=calls+VALUES(calls),units_in=units_in+VALUES(units_in),units_out=units_out+VALUES(units_out),cost=cost+VALUES(cost),errors=errors+VALUES(errors)',[$service,mb_substr((string)$op,0,40),$calls,(int)$in,(int)$out,round($cost,6),$err?1:0]);return $cost;}
+    catch(Throwable $e){return 0;}}
   // Month-to-date summary per service with projection to month end
   static function month(){
     $rows=DB::all("SELECT service,SUM(calls) calls,SUM(units_in) uin,SUM(units_out) uout,SUM(cost) cost,SUM(errors) errors FROM api_usage WHERE day>=DATE_FORMAT(CURDATE(),'%Y-%m-01') GROUP BY service");
