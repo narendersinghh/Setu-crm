@@ -19,6 +19,7 @@ if($do==='process'){
   $o=['id'=>(int)$l['id'],'name'=>$l['name'],'stage'=>$l['stage'],'stage_label'=>stages()[$l['stage']][0]??$l['stage'],'busy'=>$busy,'progress'=>(int)$l['progress'],'msg'=>$l['progress_msg'],'error'=>$l['stage']==='failed'?$l['last_error']:'','can_abort'=>can('settings')];
   if(empty($_GET['lite']))$o+=Trace::view($l['id']);
   json_out($o);}
+if($do==='prices'){if(!can('settings'))json_out(['error'=>'forbidden'],403);json_out(jd(setting('price_update')));}
 if($do==='activity'){
   if(!can('settings'))json_out(['error'=>'forbidden'],403);
   $active=DB::all("SELECT id,name,stage,progress,progress_msg,last_error,source FROM leads WHERE stage IN ('queued','auditing','reporting','contacting') ORDER BY last_activity DESC LIMIT 60");

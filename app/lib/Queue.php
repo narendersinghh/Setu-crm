@@ -4,7 +4,7 @@ final class Queue{
   static function push($type,$ref,$payload=[],$at=null){
     return DB::insert('jobs',['type'=>$type,'ref_id'=>(int)$ref,'payload'=>je($payload),'run_after'=>$at?:date('Y-m-d H:i:s')]);}
   static function due(){return (int)DB::val("SELECT COUNT(*) FROM jobs WHERE status='pending' AND run_after<=NOW()");}
-  static function dueLong(){return (int)DB::val("SELECT COUNT(*) FROM jobs WHERE status='pending' AND run_after<=NOW() AND type IN ('audit','report')");}
+  static function dueLong(){return (int)DB::val("SELECT COUNT(*) FROM jobs WHERE status='pending' AND run_after<=NOW() AND type IN ('audit','report','prices')");}
   // Progress shown on the lead row and in the activity panel
   static function progress($lid,$pct,$msg){
     // (the AI call itself is logged as its own step with tokens and cost)
@@ -28,7 +28,7 @@ final class Queue{
     if($j['type']==='audit')return 'Audit started'.$a;
     if($j['type']==='contact')return 'Sending the report'.$a;
     return ['research'=>'Report · step 1 of 3: market research','write'=>'Report · step 2 of 3: AI writes the report','pdf'=>'Report · step 3 of 3: PDF design'][$p['phase']??'research'].$a;}
-  const LONG=['audit','report'];
+  const LONG=['audit','report','prices'];
   // $quick=true: only short jobs (searches, contact scans, sends, automations) – used by the browser poll,
   // so slow AI steps always run in the detached background worker where web-server time limits do not apply
   static function work($budget=null,$quick=false){
@@ -38,7 +38,7 @@ final class Queue{
     $t0=microtime(true);$n=0;
     self::reapStuck();
     while(microtime(true)-$t0<$budget){
-      $j=DB::row("SELECT * FROM jobs WHERE status='pending' AND run_after<=NOW()".($quick?" AND type NOT IN ('audit','report')":'')." ORDER BY FIELD(type,'search','enrich','auto','audit','report','contact'),id LIMIT 1");
+      $j=DB::row("SELECT * FROM jobs WHERE status='pending' AND run_after<=NOW()".($quick?" AND type NOT IN ('audit','report','prices')":'')." ORDER BY FIELD(type,'search','enrich','auto','audit','report','contact'),id LIMIT 1");
       if(!$j)break;
       if(!DB::q("UPDATE jobs SET status='running',locked_at=NOW(),attempts=attempts+1 WHERE id=? AND status='pending'",[$j['id']])->rowCount())continue;
       $tr=in_array($j['type'],['audit','report','contact'],true);
@@ -54,7 +54,7 @@ final class Queue{
     foreach(DB::all("SELECT * FROM jobs WHERE status='running' AND locked_at<NOW()-INTERVAL IF(type='report',GREATEST(?,8),?) MINUTE",[$min,$min]) as $j){
       $msg='Timed out – the server stopped this step after '.$min.' min (often a slow AI model or a host time limit).';
       if(in_array($j['type'],['audit','report','contact'],true)){DB::q("UPDATE job_steps SET status='err',detail=? WHERE job_id=? AND status='run'",['The server stopped this step (time limit or crash).',$j['id']]);DB::insert('job_steps',['lead_id'=>$j['ref_id'],'job_id'=>$j['id'],'kind'=>'step','step'=>mb_substr($msg,0,190),'status'=>'err']);}
-      if($j['attempts']<2&&$j['type']!=='search'){DB::q("UPDATE jobs SET status='pending',locked_at=NULL,error=? WHERE id=?",[$msg.' Retrying…',$j['id']]);continue;}
+      if($j['attempts']<2&&!in_array($j['type'],['search','prices'],true)){DB::q("UPDATE jobs SET status='pending',locked_at=NULL,error=? WHERE id=?",[$msg.' Retrying…',$j['id']]);continue;}
       self::fail($j,new Exception($msg.' Try again, or choose a faster AI model in AI Connection.'),true);}}
   private static function fail($j,$e,$final=false){
     $msg=$e->getMessage();
@@ -67,6 +67,7 @@ final class Queue{
     DB::q("UPDATE jobs SET status='failed',error=? WHERE id=?",[$msg,$j['id']]);
     if($j['type']==='search')DB::update('campaigns',['status'=>'error','error'=>$msg],'id=?',[$j['ref_id']]);
     elseif($j['type']==='auto')Automation::failed($j['ref_id'],$msg);
+    elseif($j['type']==='prices')return;
     elseif($j['type']!=='enrich'){DB::update('leads',['stage'=>'failed','last_error'=>$msg,'progress_msg'=>'Failed'],'id=?',[$j['ref_id']]);event($j['ref_id'],'error',ucfirst($j['type']).' failed: '.$msg);}}
   private static function handle($j){
     $p=jd($j['payload']);$id=(int)$j['ref_id'];
@@ -77,7 +78,8 @@ final class Queue{
       case 'report':self::report($id,$p);break;
       case 'contact':Outreach::contact($id,$p);break;
       case 'auto':Automation::step($id);break;
-      case 'call':Voice::call($id,$p);break;}}
+      case 'call':Voice::call($id,$p);break;
+      case 'prices':Usage::aiPrices();break;}}
   // Map search, one result page per job. Businesses already in your data (any earlier search or Leads) are skipped.
   // Google Places: a free IDs-only request first, so pages with nothing new cost nothing and only new businesses are paid for.
   private static function search($cid,$p){

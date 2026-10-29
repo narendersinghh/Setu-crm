@@ -41,6 +41,35 @@ final class Usage{
       if($model!==null){$mp=$p['_models'][$model]??$p['_models'][preg_replace('~^.*/~','',$model)]??null;if($mp)$cost=$in/1e6*(float)$mp['in']+$out/1e6*(float)$mp['out'];}
       DB::q('INSERT INTO api_usage (day,service,op,calls,units_in,units_out,cost,errors) VALUES (CURDATE(),?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE calls=calls+VALUES(calls),units_in=units_in+VALUES(units_in),units_out=units_out+VALUES(units_out),cost=cost+VALUES(cost),errors=errors+VALUES(errors)',[$service,mb_substr((string)$op,0,40),$calls,(int)$in,(int)$out,round($cost,6),$err?1:0]);return $cost;}
     catch(Throwable $e){return 0;}}
+  // Ask the AI (live web search on Claude) for current list prices & free limits; saves only sane, changed values.
+  // Runs as a background job; progress/result is kept in the "price_update" setting.
+  static function aiPrices(){
+    $st=fn($a)=>Settings::set('price_update',je($a+['at'=>date('Y-m-d H:i:s')]));
+    $st(['status'=>'running','msg'=>'The AI is checking the pricing pages…']);
+    $P=self::prices();$svc=[];
+    foreach(self::catalog() as $k=>$c)if($c[2]!=='tokens'&&!in_array($k,['custom','voice_custom','whatsapp_api','email'],true))$svc[]=['key'=>$k,'name'=>$c[0],'unit'=>'USD per '.rtrim($c[2],'s'),'current_price'=>(float)($P[$k]['price']??$c[3]),'current_free_units'=>(float)($P[$k]['free']??$c[4]),'free_resets_every'=>$c[5],'pricing_page'=>$c[6],'notes'=>$c[7]];
+    $mdl=[];foreach($P['_models'] as $id=>$x)$mdl[]=['id'=>$id,'input_per_1M'=>(float)$x['in'],'output_per_1M'=>(float)$x['out']];
+    $sys="You are a cloud API pricing analyst. Check the CURRENT official list prices (USD) on the providers' own pricing pages (use web search when available). Return ONLY one JSON object: {\"services\":[{\"key\":\"\",\"price\":number,\"free\":number,\"source\":\"https://...\",\"note\":\"max 80 chars\"}],\"models\":[{\"id\":\"\",\"in\":number,\"out\":number,\"source\":\"https://...\"}]}. price = USD per single unit (e.g. 0.035 for \$35 per 1,000 requests), free = free units per period (0 if none). Model prices are USD per 1 million input/output tokens at standard (non-batch, non-cached) rates. Include ONLY items whose current price or free limit differs from the values given, and only when you found it on an official page. Never guess.";
+    try{
+      $raw=AI::complete($sys,"Today: ".date('Y-m-d')."\nServices (keep the same keys):\n".je($svc)."\n\nAI models (keep the same ids):\n".je($mdl),6000,null,['research'=>true,'searches'=>8,'op'=>'prices','deadline'=>280,'label'=>'Checking API prices']);
+      $d=Report::parse($raw,'services')??Report::parse($raw,'models');
+      if(!is_array($d))throw new Exception('The AI answer could not be read. Try again or use a Claude model (it can search the web).');
+      $o=jd(setting('usage_prices'));$cat=self::catalog();$ch=[];
+      foreach((array)($d['services']??[]) as $x){
+        $k=$x['key']??'';if(!isset($cat[$k])||!is_numeric($x['price']??null))continue;
+        $pr=(float)$x['price'];$fr=is_numeric($x['free']??null)?(float)$x['free']:(float)($P[$k]['free']??0);
+        if($pr<0||$pr>50||$fr<0||$fr>100000000)continue;
+        $op=(float)($P[$k]['price']??0);$of=(float)($P[$k]['free']??0);
+        if(abs($pr-$op)<1e-9&&abs($fr-$of)<1e-6)continue;
+        $o[$k]=['price'=>$pr,'free'=>$fr];$ch[]=$cat[$k][0].': $'.rtrim(rtrim(number_format($op,5),'0'),'.').' → $'.rtrim(rtrim(number_format($pr,5),'0'),'.').($fr!=$of?', free '.number_format($of).' → '.number_format($fr):'').(!empty($x['source'])?' ('.$x['source'].')':'');}
+      foreach((array)($d['models']??[]) as $x){
+        $id=trim((string)($x['id']??''));if(!isset($P['_models'][$id])||!is_numeric($x['in']??null)||!is_numeric($x['out']??null))continue;
+        $in=(float)$x['in'];$out=(float)$x['out'];if($in<0||$in>500||$out<0||$out>2000)continue;
+        $old=$P['_models'][$id];if(abs($in-$old['in'])<1e-9&&abs($out-$old['out'])<1e-9)continue;
+        $o['_models'][$id]=['in'=>$in,'out'=>$out];$ch[]=$id.': $'.$old['in'].' / $'.$old['out'].' → $'.$in.' / $'.$out.' per 1M tokens'.(!empty($x['source'])?' ('.$x['source'].')':'');}
+      if($ch)Settings::set('usage_prices',je($o));
+      $st(['status'=>'done','msg'=>$ch?count($ch).' price(s) updated from the providers\' pricing pages.':'All prices and free limits are already up to date.','changes'=>array_slice($ch,0,40)]);}
+    catch(Throwable $e){$st(['status'=>'error','msg'=>$e->getMessage()]);throw $e;}}
   // Month-to-date summary per service with projection to month end
   static function month(){
     $rows=DB::all("SELECT service,SUM(calls) calls,SUM(units_in) uin,SUM(units_out) uout,SUM(cost) cost,SUM(errors) errors FROM api_usage WHERE day>=DATE_FORMAT(CURDATE(),'%Y-%m-01') GROUP BY service");
