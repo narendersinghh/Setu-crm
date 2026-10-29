@@ -82,6 +82,24 @@ function public_ip($url){
 // Only http(s) links are ever printed into href attributes
 // Simple per-key rate limit (public forms, booking, login): false when more than $max hits within $min minutes
 function throttle($key,$max,$min=15){$k=substr($key,0,45);$n=(int)DB::val('SELECT n FROM login_fails WHERE ip=? AND last>NOW()-INTERVAL '.(int)$min.' MINUTE',[$k]);if($n>=$max)return false;DB::q('INSERT INTO login_fails (ip,n,last) VALUES (?,1,NOW()) ON DUPLICATE KEY UPDATE n=IF(last<NOW()-INTERVAL '.(int)$min.' MINUTE,1,n+1),last=NOW()',[$k]);return true;}
+// Check many links at once (parallel). Returns url => true when the page opens. Missing pages (404/410),
+// dead domains, server errors and "page not found" pages count as broken; 401/403/429 (bot blocking) count as working.
+function links_ok($urls){
+  $urls=array_values(array_unique(array_filter(array_map('trim',(array)$urls))));$out=[];$mh=curl_multi_init();$hs=[];$buf=[];
+  foreach($urls as $i=>$u){
+    if(!public_ip($u)){$out[$u]=false;continue;}
+    $buf[$i]='';$ch=curl_init($u);
+    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>false,CURLOPT_FOLLOWLOCATION=>true,CURLOPT_MAXREDIRS=>6,CURLOPT_PROTOCOLS=>CURLPROTO_HTTP|CURLPROTO_HTTPS,CURLOPT_REDIR_PROTOCOLS=>CURLPROTO_HTTP|CURLPROTO_HTTPS,CURLOPT_TIMEOUT=>12,CURLOPT_CONNECTTIMEOUT=>6,CURLOPT_ENCODING=>'',CURLOPT_USERAGENT=>'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',CURLOPT_HTTPHEADER=>['Accept: text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8','Accept-Language: en'],
+      CURLOPT_WRITEFUNCTION=>function($c,$d)use(&$buf,$i){$buf[$i].=$d;return strlen($buf[$i])>60000?0:strlen($d);}]);
+    curl_multi_add_handle($mh,$ch);$hs[$i]=$ch;}
+  do{$st=curl_multi_exec($mh,$run);if($run)curl_multi_select($mh,1);}while($run&&$st===CURLM_OK);
+  foreach($hs as $i=>$ch){
+    $code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);$b=$buf[$i];
+    $soft=preg_match('~<title[^>]*>[^<]{0,120}(404|not found|page (?:does not|doesn.t) exist|page unavailable|no longer available)~i',$b);
+    $out[$urls[$i]]=(($code>=200&&$code<400)&&!$soft)||in_array($code,[401,403,429],true);
+    curl_multi_remove_handle($mh,$ch);curl_close($ch);}
+  curl_multi_close($mh);
+  return $out;}
 function safe_url($u){$u=trim((string)$u);return preg_match('~^https?://~i',$u)?$u:'#';}
 function http($url,$o=[]){
   // Fetching a third-party website (audits, contact scan): every hop must resolve to a public IP; DNS is pinned per hop
